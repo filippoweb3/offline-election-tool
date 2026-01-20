@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_default_ss58_version(chain.ss58_address_format());
 
     // Fetch all constants from chain API
-    let miner_constants = miner_config::fetch_constants(chain, &subxt_client).await?;
+    let miner_constants = miner_config::fetch_constants(&subxt_client).await?;
     info!("Fetched constants: pages={}, max_winners_per_page={}, max_backers_per_winner={}, voter_snapshot_per_block={}, target_snapshot_per_block={}, max_length={}",
         miner_constants.pages,
         miner_constants.max_winners_per_page,

@@ -18,7 +18,6 @@ pub struct MinerConstants {
 	pub voter_snapshot_per_block: u32,
 	pub target_snapshot_per_block: u32,
 	pub max_length: u32,
-	pub max_election_voters: usize,
 }
 
 #[derive(Decode, Deserialize, Debug)]
@@ -45,7 +44,6 @@ pub struct PerDispatchClass {
 
 /// Helper function to fetch constants from chain API
 pub async fn fetch_constants<C: ChainClientTrait>(
-	chain: Chain,
 	client: &C,
 ) -> Result<MinerConstants, Box<dyn std::error::Error>> {
 	let pages = client
@@ -75,12 +73,6 @@ pub async fn fetch_constants<C: ChainClientTrait>(
 
 	let max_length = Percent::from_percent(75) * block_length.total();
 
-	let max_election_voters = match chain {
-		Chain::Polkadot => 22500,
-		Chain::Kusama => 12500,
-		Chain::Substrate => 22500,
-	};
-
 	Ok(MinerConstants {
 		pages,
 		max_winners_per_page,
@@ -88,7 +80,6 @@ pub async fn fetch_constants<C: ChainClientTrait>(
 		voter_snapshot_per_block,
 		target_snapshot_per_block,
 		max_length,
-		max_election_voters,
 	})
 }
 
@@ -138,7 +129,6 @@ pub fn initialize_runtime_constants() {
 			voter_snapshot_per_block: 2,
 			target_snapshot_per_block: 2,
 			max_length: 100000000,
-			max_election_voters: 22500,
 		});
 	});
 }

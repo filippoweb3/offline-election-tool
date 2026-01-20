@@ -9,7 +9,6 @@ use sp_core::Get;
 use futures::future::join_all;
 use tracing::info;
 
-use crate::miner_config;
 use crate::multi_block_state_client::{BlockDetails, ChainClientTrait, ElectionSnapshotPage, MultiBlockClientTrait, StorageTrait, TargetSnapshotPage, VoterData, VoterSnapshotPage};
 use crate::primitives::{AccountId, Storage};
 use crate::raw_state_client::RawClientTrait;
@@ -247,9 +246,10 @@ where
         }).collect();
 
         let results = join_all(voter_futures).await;
+        // limit to snapshot capacity (per-page slots * pages) to match real snapshot size
+        let max_voters = MC::VoterSnapshotPerBlock::get() as usize * block_details.n_pages as usize;
         for result in results {
-            // Replicate cut-off logic from MultiBlockElection pallet
-            if voters.len() == miner_config::get_runtime_constants().max_election_voters as usize {
+            if voters.len() >= max_voters {
                 break;
             }
             match result {
