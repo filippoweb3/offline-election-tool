@@ -80,7 +80,7 @@ S: StorageTrait + From<Storage> + Clone + 'static,
 
         rt.block_on(async {
             // Run simulation within task-local scope for algorithm, iterations, and max nominations
-            miner_config::with_election_config(state.chain, algorithm, iterations, max_nominations, 
+            miner_config::with_election_config(algorithm, iterations, max_nominations, 
                 async move {
                     state.simulate_service.simulate(
                         block,

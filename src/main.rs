@@ -159,8 +159,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         miner_constants.max_length,
     );
     
-    // Set runtime constants
-    miner_config::set_runtime_constants(miner_constants.clone());
+    // Set runtime constants and chain-specific max_votes_per_voter
+    miner_config::set_runtime_constants(miner_constants.clone(), chain);
 
     match args.action {
         Action::Simulate(simulate_args) => {
@@ -176,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let algorithm = simulate_args.algorithm;
             let iterations = simulate_args.iterations;
             let max_nominations = simulate_args.max_nominations;
-            miner_config::set_election_config(chain, algorithm, iterations, max_nominations);
+            miner_config::set_election_config(algorithm, iterations, max_nominations);
             let apply_reduce = simulate_args.reduce;
             let manual_override = if let Some(path) = simulate_args.manual_override.clone() {
                 let file = std::fs::read(&path)

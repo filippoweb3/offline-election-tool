@@ -89,13 +89,20 @@ use tokio::task_local;
 
 static RUNTIME_CONFIG: OnceLock<MinerConstants> = OnceLock::new();
 
-// Task-local storage for balancing iterations (each async task gets its own value)
+// Task-local storage for max_votes_per_voter (each async task gets its own value)
+task_local! {
+	static MAX_VOTES_PER_VOTER: u32;
+}
+
+// Global fallback for max_votes_per_voter - set at startup based on chain
+static MAX_VOTES_PER_VOTER_FALLBACK: Mutex<u32> = Mutex::new(16);
+
+// Task-local storage for election algorithm config (each async task gets its own value)
 // This prevents race conditions when multiple requests run concurrently
 #[derive(Debug, Clone)]
 struct ElectionConfig {
 	algorithm: Algorithm,
 	iterations: usize,
-	max_votes_per_voter: u32,
 }
 task_local! {
 	static ELECTION_CONFIG: ElectionConfig;
@@ -105,12 +112,22 @@ task_local! {
 static ELECTION_CONFIG_FALLBACK: Mutex<ElectionConfig> = Mutex::new(ElectionConfig {
 	algorithm: Algorithm::SeqPhragmen,
 	iterations: 0,
-	max_votes_per_voter: 16,
 });
 
-/// Set the runtime miner constants (should be called once at startup)
-pub fn set_runtime_constants(constants: MinerConstants) {
+/// Set the runtime miner constants and chain-specific max_votes_per_voter (should be called once at startup)
+pub fn set_runtime_constants(constants: MinerConstants, chain: Chain) {
 	RUNTIME_CONFIG.set(constants).expect("Runtime constants already set");
+	set_max_votes_per_voter(chain);
+}
+
+/// Set max_votes_per_voter based on chain
+fn set_max_votes_per_voter(chain: Chain) {
+	let max_votes = match chain {
+		Chain::Polkadot => 16,
+		Chain::Kusama => 24,
+		Chain::Substrate => 16,
+	};
+	*MAX_VOTES_PER_VOTER_FALLBACK.lock().unwrap() = max_votes;
 }
 
 #[cfg(test)]
@@ -129,51 +146,37 @@ pub fn initialize_runtime_constants() {
 			voter_snapshot_per_block: 2,
 			target_snapshot_per_block: 2,
 			max_length: 100000000,
-		});
+		}, Chain::Polkadot);
 	});
 }
 
-/// Set election algorithm, balancing iterations, and max nominations from args
+/// Set election algorithm, balancing iterations, and optional max_votes_per_voter override
 /// 
 /// Note: For concurrent API requests, use `with_election_config` instead
 /// to ensure each request gets its own isolated value.
-/// This function sets a global fallback value, which works for CLI usage.
-pub fn set_election_config(chain: Chain, algorithm: Algorithm, iterations: usize, max_votes_per_voter: Option<u32>) {
-	let max_votes_per_voter = if let Some(max_votes_per_voter) = max_votes_per_voter {
-		max_votes_per_voter
-	} else {
-		match chain {
-			Chain::Polkadot => 16,
-			Chain::Kusama => 24,
-			Chain::Substrate => 16,
-		}
-	};
+/// This function sets global fallback values, which works for CLI usage.
+/// 
+/// `max_votes_per_voter` - if Some, overrides the chain default; if None, keeps chain default
+pub fn set_election_config(algorithm: Algorithm, iterations: usize, max_votes_per_voter: Option<u32>) {
 	*ELECTION_CONFIG_FALLBACK.lock().unwrap() = ElectionConfig {
 		algorithm,
 		iterations,
-		max_votes_per_voter,
 	};
+	if let Some(val) = max_votes_per_voter {
+		*MAX_VOTES_PER_VOTER_FALLBACK.lock().unwrap() = val;
+	}
 }
 
 /// Run a future with a specific algorithm, balancing iterations, and max votes per voter set for this task.
-pub async fn with_election_config<F, R>(chain: Chain, algorithm: Algorithm, iterations: usize, max_votes_per_voter: Option<u32>, f: F) -> R
+pub async fn with_election_config<F, R>(algorithm: Algorithm, iterations: usize, max_votes_per_voter: Option<u32>, f: F) -> R
 where
 	F: std::future::Future<Output = R>,
 {
-	let max_votes_per_voter = if let Some(max_votes_per_voter) = max_votes_per_voter {
-		max_votes_per_voter
-	} else {
-		match chain {
-			Chain::Polkadot => 16,
-			Chain::Kusama => 24,
-			Chain::Substrate => 16,
-		}
-	};
+	let max_votes = max_votes_per_voter.unwrap_or_else(|| *MAX_VOTES_PER_VOTER_FALLBACK.lock().unwrap());
 	ELECTION_CONFIG.scope(ElectionConfig {
 		algorithm,
 		iterations,
-		max_votes_per_voter,
-	}, f).await
+	}, MAX_VOTES_PER_VOTER.scope(max_votes, f)).await
 }
 
 /// Get the runtime miner constants
@@ -241,9 +244,8 @@ impl sp_core::Get<u32> for MaxLength {
 impl sp_core::Get<u32> for MaxVotesPerVoter {
 	fn get() -> u32 {
 		// Try task-local first (for API requests), fall back to global (for CLI)
-		// If not set in request, use the chain constant
-		ELECTION_CONFIG.try_with(|v| v.max_votes_per_voter)
-			.unwrap_or_else(|_| ELECTION_CONFIG_FALLBACK.lock().unwrap().max_votes_per_voter)
+		MAX_VOTES_PER_VOTER.try_with(|v| *v)
+			.unwrap_or_else(|_| *MAX_VOTES_PER_VOTER_FALLBACK.lock().unwrap())
 	}
 }
 

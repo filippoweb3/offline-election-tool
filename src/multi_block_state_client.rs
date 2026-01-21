@@ -216,7 +216,14 @@ impl<C: ChainClientTrait + Send + Sync + 'static, MC: MinerConfig + Send + Sync 
         let storage: S = self.get_storage(block).await?;
 		let phase = self.get_phase(&storage).await?;
         let round = self.get_round(&storage).await?;
-        let desired_targets = self.get_desired_targets(&storage, round).await.unwrap_or(600);
+        let desired_targets_result = self.get_desired_targets(&storage, round).await;
+        let desired_targets = match desired_targets_result {
+            Ok(desired_targets) => desired_targets,
+            Err(_) => {
+                tracing::warn!("Desired targets not found, using default of 600");
+                600
+            }
+        };
 		let n_pages = MC::Pages::get();
 		let block_number = self.get_block_number(&storage).await?;
 		let block_hash = block;
