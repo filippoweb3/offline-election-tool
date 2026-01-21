@@ -183,6 +183,7 @@ pub trait MultiBlockClientTrait<C: ChainClientTrait + Send + Sync + 'static, MC:
     async fn get_block_number(&self, storage: &S) -> Result<u32, Box<dyn std::error::Error + Send + Sync>>;
     async fn get_min_nominator_bond(&self, storage: &S) -> Result<u128, Box<dyn std::error::Error + Send + Sync>>;
     async fn get_min_validator_bond(&self, storage: &S) -> Result<u128, Box<dyn std::error::Error + Send + Sync>>;
+    async fn get_staking_validator_count(&self, storage: &S) -> Result<u32, Box<dyn std::error::Error + Send + Sync>>;
     async fn fetch_paged_voter_snapshot(&self, storage: &S, round: u32, page: u32) -> Result<VoterSnapshotPage<MC>, Box<dyn std::error::Error + Send + Sync>>;
     async fn fetch_paged_target_snapshot(&self, storage: &S, round: u32, page: u32) -> Result<TargetSnapshotPage<MC>, Box<dyn std::error::Error + Send + Sync>>;
     async fn get_validator_prefs(&self, storage: &S, validator: AccountId) -> Result<ValidatorPrefs, Box<dyn std::error::Error + Send + Sync>>;
@@ -216,12 +217,18 @@ impl<C: ChainClientTrait + Send + Sync + 'static, MC: MinerConfig + Send + Sync 
         let storage: S = self.get_storage(block).await?;
 		let phase = self.get_phase(&storage).await?;
         let round = self.get_round(&storage).await?;
-        let desired_targets_result = self.get_desired_targets(&storage, round).await;
-        let desired_targets = match desired_targets_result {
+        let desired_targets = match self.get_desired_targets(&storage, round).await {
             Ok(desired_targets) => desired_targets,
             Err(_) => {
-                tracing::warn!("Desired targets not found, using default of 600");
-                600
+                // DesiredTargets is only available when snapshot exists.
+                // Fall back to Staking::ValidatorCount which is always available.
+                let validator_count = self.get_staking_validator_count(&storage).await?;
+                tracing::warn!(
+                    "MultiBlockElection::DesiredTargets not found for round {} (phase: {:?}), \
+                    using Staking::ValidatorCount: {}",
+                    round, phase, validator_count
+                );
+                validator_count
             }
         };
 		let n_pages = MC::Pages::get();
@@ -291,6 +298,15 @@ impl<C: ChainClientTrait + Send + Sync + 'static, MC: MinerConfig + Send + Sync 
             .ok_or("MinValidatorBond not found")?;
         let min_validator_bond: u128 = codec::Decode::decode(&mut min_validator_bond_entry.encoded())?;
         Ok(min_validator_bond)
+    }
+
+    async fn get_staking_validator_count(&self, storage: &S) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        let storage_key = subxt::dynamic::storage("Staking", "ValidatorCount", vec![]);
+        let validator_count_entry = storage.fetch(&storage_key)
+            .await?
+            .ok_or("Staking::ValidatorCount not found")?;
+        let validator_count: u32 = codec::Decode::decode(&mut validator_count_entry.encoded())?;
+        Ok(validator_count)
     }
 
     async fn fetch_paged_voter_snapshot(&self, storage: &S, round: u32, page: u32) -> Result<VoterSnapshotPage<MC>, Box<dyn std::error::Error + Send + Sync>> {
